@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — 2026-11-25
+
+- Moved the entry to the left of the composer tool row and renamed it to **AI polish**.
+- Added `structured` / `concise` / `detailed` styles, selectable in the composer and remembered in localStorage (style id only, never prompt text).
+- Default input limit is now 12000 characters; the client reads the live limit from `/health` and disables the button with a localized reason before sending.
+- Documented code-block/inline-code preservation and the no-logging posture of the button path.
+- Added style instructions and regression tests (40 total).
+
 ## 0.1.1 — 2026-11-25
 
 - Stronger rewrite policy: a vague one-line goal expands into a structured prompt with analysis dimensions, output shape, and acceptance criteria; a concrete request that already names files, constraints, and deliverables stays close to the original.

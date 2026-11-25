@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { resolveConfig } from '../lib/config.js';
 import {
   DEFAULT_SYSTEM_PROMPT,
+  STYLE_INSTRUCTIONS,
   OptimizeError,
   cleanOutput,
   isNearNoOp,
@@ -56,7 +57,7 @@ test('optimizePrompt sends the draft unchanged and returns the streamed reply', 
   assert.equal(sink.prepare.model, 'deepseek-flash');
   assert.equal(sink.prepare.maxTokens, config.maxOutputTokens);
   assert.equal(sink.prepare.temperature, config.temperature);
-  assert.equal(sink.stream.system, DEFAULT_SYSTEM_PROMPT);
+  assert.equal(sink.stream.system, `${DEFAULT_SYSTEM_PROMPT}\n\n${STYLE_INSTRUCTIONS.structured}`);
   assert.deepEqual(sink.stream.messages, [{ role: 'user', content: [{ type: 'text', text: '把登录页改成深色的' }] }]);
 });
 
@@ -83,7 +84,7 @@ test('optimizePrompt honours a configured system prompt override', async () => {
     text: 'hello',
     config: resolveConfig({ systemPrompt: 'CUSTOM INSTRUCTION' }),
   });
-  assert.equal(sink.stream.system, 'CUSTOM INSTRUCTION');
+  assert.equal(sink.stream.system, `CUSTOM INSTRUCTION\n\n${STYLE_INSTRUCTIONS.structured}`);
 });
 
 test('optimizePrompt rejects empty, non-string, and oversized drafts before the model call', async () => {
@@ -243,4 +244,40 @@ test('optimizePrompt reports no-improvement when the retry is also a no-op', asy
     (error) => error instanceof OptimizeError && error.code === 'no-improvement' && error.status === 422,
   );
   assert.equal(calls, 2);
+});
+
+test('optimizePrompt appends the requested rewrite style', async () => {
+  const sink = {};
+  const llm = fakeLlm([
+    { type: 'text-delta', index: 0, text: 'A shorter, clearer prompt.' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ], sink);
+
+  await optimizePrompt({
+    llm,
+    route: { provider: 'p', model: 'm' },
+    text: 'make this shorter',
+    style: 'concise',
+    config,
+  });
+
+  assert.equal(sink.stream.system, `${DEFAULT_SYSTEM_PROMPT}\n\n${STYLE_INSTRUCTIONS.concise}`);
+});
+
+test('optimizePrompt defaults an unknown style to structured', async () => {
+  const sink = {};
+  const llm = fakeLlm([
+    { type: 'text-delta', index: 0, text: 'A clearer prompt.' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ], sink);
+
+  await optimizePrompt({
+    llm,
+    route: { provider: 'p', model: 'm' },
+    text: 'make this clearer',
+    style: 'wild',
+    config,
+  });
+
+  assert.equal(sink.stream.system, `${DEFAULT_SYSTEM_PROMPT}\n\n${STYLE_INSTRUCTIONS.structured}`);
 });

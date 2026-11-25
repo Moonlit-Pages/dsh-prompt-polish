@@ -76,7 +76,7 @@ test('apply registers the toolbar buttons and the status strip', () => {
   assert.equal(effects, 3);
   assert.equal(registrations.length, 2);
   assert.deepEqual(registrations.map((r) => r.options.name), [
-    'conversation.input.right',
+    'conversation.input.left',
     'conversation.input.dock',
   ]);
   assert.deepEqual(registrations.map((r) => r.options.id), ['prompt-polish', 'prompt-polish-status']);
@@ -110,7 +110,7 @@ test('optimize replaces the draft and undo restores it exactly', async () => {
   assert.equal(calls[0].init.method, 'POST');
   assert.equal(calls[0].init.headers['content-type'], 'application/json');
   assert.equal(calls[0].init.credentials, 'same-origin');
-  assert.deepEqual(JSON.parse(calls[0].init.body), { text: '  original draft  ', sessionId: 'session-1' });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { text: '  original draft  ', sessionId: 'session-1', style: 'structured' });
   assert.equal(store.get().status, 'done');
   assert.equal(store.get().before, '  original draft  ');
   assert.equal(store.get().after, 'POLISHED');
@@ -228,6 +228,8 @@ test('the gating helpers cover every disabled reason', () => {
   assert.equal(canOptimize({ ...base, phase: 'sending' }).reason, 'locked');
   assert.equal(canOptimize({ ...base, text: '  ' }).reason, 'empty');
   assert.equal(canOptimize({ ...base, occurrenceCount: 1 }).reason, 'references');
+  assert.equal(canOptimize({ ...base, text: 'x'.repeat(12001), maxInputChars: 12000 }).reason, 'too-long');
+  assert.equal(canOptimize({ ...base, text: 'x'.repeat(12000), maxInputChars: 12000 }).enabled, true);
 
   const idle = canUndo({ status: 'idle', after: '' }, 'hello');
   assert.equal(idle.visible, false);
@@ -366,4 +368,26 @@ test('cancel clears the loading state for its own session only', async () => {
   release();
   const result = await pending;
   assert.equal(result.code, 'superseded');
+});
+
+test('the selected rewrite style is sent to the host', async () => {
+  const store = createStore();
+  const calls = [];
+  const controller = createController(store, {
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return jsonResponse({ ok: true, value: { text: 'SHORTER' } });
+    },
+  });
+
+  let draft = 'make this shorter';
+  await controller.optimize({
+    text: draft,
+    sessionId: 's',
+    style: 'concise',
+    setDraft: (value) => { draft = value; },
+    getDraft: () => draft,
+  });
+
+  assert.equal(JSON.parse(calls[0].init.body).style, 'concise');
 });

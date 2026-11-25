@@ -59,6 +59,7 @@ test('health reports the plugin, version, and limits', async () => {
   assert.equal(res.json().value.plugin, 'dsh-prompt-polish');
   assert.equal(res.json().value.version, '0.1.0');
   assert.equal(res.json().value.limits.maxInputChars, 20);
+  assert.deepEqual(res.json().value.styles, ['structured', 'concise', 'detailed']);
 });
 
 test('health refuses other methods', async () => {
@@ -82,6 +83,7 @@ test('optimize returns the polished envelope and forwards the session', async ()
   assert.deepEqual(res.json(), { ok: true, value: { text: 'better', provider: 'p', model: 'm' } });
   assert.equal(seen[0].text, 'draft');
   assert.equal(seen[0].sessionId, 's1');
+  assert.equal(seen[0].style, 'structured');
   assert.ok(seen[0].signal instanceof AbortSignal);
 });
 
@@ -126,6 +128,11 @@ test('optimize validates method, body, text, and size', async () => {
   await routes[1].handler(makeReq({ body: { text: 'x'.repeat(21) } }), tooLong);
   assert.equal(tooLong.statusCode, 413);
   assert.equal(tooLong.json().error.code, 'too-long');
+
+  const badStyle = makeRes();
+  await routes[1].handler(makeReq({ body: { text: 'draft', style: 'wild' } }), badStyle);
+  assert.equal(badStyle.statusCode, 400);
+  assert.equal(badStyle.json().error.code, 'invalid-style');
 });
 
 test('optimize maps core failures to status codes and never leaks a stack', async () => {

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Prompt polish",
-    "description": "Adds a Polish button beside the composer model selector: rewrite the current draft with the selected model, then undo the rewrite in one click.",
+    "description": "Adds an AI polish button and three styles to the left of the composer: rewrite the draft, write it back without sending, and undo in one click.",
     "detail": "docs/DETAIL.md"
   }
 }
