@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-polish",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prompt polish button beside the composer model selector: rewrite the draft, then undo the rewrite.",
   "type": "module",
   "license": "MIT",

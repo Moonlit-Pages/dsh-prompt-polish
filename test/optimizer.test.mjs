@@ -6,6 +6,8 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   OptimizeError,
   cleanOutput,
+  isNearNoOp,
+  normalizeForComparison,
   optimizePrompt,
 } from '../lib/optimizer.js';
 
@@ -172,4 +174,73 @@ test('cleanOutput strips only a wrapping fence and an explicit label', () => {
   assert.equal(cleanOutput('优化后的提示词：修复这个 bug。'), '修复这个 bug。');
   assert.equal(cleanOutput('Fix the bug.'), 'Fix the bug.');
   assert.equal(cleanOutput('  keep\n  indentation  '), 'keep\n  indentation');
+});
+
+test('isNearNoOp catches politeness-only rewrites and punctuation changes', () => {
+  assert.equal(isNearNoOp('深入分析美国中期选举的影响。', '请深入分析美国中期选举的影响。'), true);
+  assert.equal(isNearNoOp('Analyze the impact.', 'Please analyze the impact.'), true);
+  assert.equal(isNearNoOp('  done  ', 'Done!'), true);
+  assert.equal(
+    isNearNoOp('深入分析美国中期选举的影响。', '深入分析美国中期选举的影响，要求：\n1. 说明对立法议程的影响。'),
+    false,
+  );
+  assert.equal(normalizeForComparison('请帮我 Analyze this!', ), 'analyzethis');
+});
+
+test('optimizePrompt retries once when the reply is a no-op', async () => {
+  const replies = [
+    '请深入分析美国中期选举的影响。',
+    '深入分析美国中期选举的影响，要求：\n1. 说明对国会立法议程、总统施政空间的影响。',
+  ];
+  const calls = [];
+  const llm = {
+    async prepareCall(callConfig) {
+      const index = calls.length;
+      calls.push(callConfig);
+      return {
+        config: { ...callConfig },
+        async *stream() {
+          yield { type: 'text-delta', index: 0, text: replies[index] };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+        },
+      };
+    },
+  };
+
+  const result = await optimizePrompt({
+    llm,
+    route: { provider: 'p', model: 'm' },
+    text: '深入分析美国中期选举的影响。',
+    config,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.match(result.text, /要求/);
+});
+
+test('optimizePrompt reports no-improvement when the retry is also a no-op', async () => {
+  let calls = 0;
+  const llm = {
+    async prepareCall(callConfig) {
+      calls += 1;
+      return {
+        config: { ...callConfig },
+        async *stream() {
+          yield { type: 'text-delta', index: 0, text: '请深入分析美国中期选举的影响。' };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    optimizePrompt({
+      llm,
+      route: { provider: 'p', model: 'm' },
+      text: '深入分析美国中期选举的影响。',
+      config,
+    }),
+    (error) => error instanceof OptimizeError && error.code === 'no-improvement' && error.status === 422,
+  );
+  assert.equal(calls, 2);
 });

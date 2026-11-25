@@ -12,6 +12,8 @@ Open **Settings → Plugins → Add plugin**, choose this directory (the one con
 
 ## Behaviour
 
+- Vague one-line goals expand into a structured prompt; concrete requests that already name files, constraints, and deliverables stay close to the original.
+- A reply that only adds 「请」/「please」 is retried once, then reported as `no-improvement` instead of replacing the draft.
 - Empty drafts disable the button.
 - Drafts containing `@file` references disable the button: replacing the draft would drop the reference chips, so the plugin refuses instead of losing them.
 - A failed polish leaves the draft untouched and shows the reason in a dismissible strip above the composer card, including the blank new-session composer.
@@ -24,7 +26,7 @@ Override the `prompt-polish` row's `config` in the profile `cordis.patch.yml`: `
 
 ## Limits
 
-Requires the Host `llm` service and provider credentials. Each polish is one real model call. The result arrives in one piece, not streamed. Undo keeps only the most recent polish.
+Requires the Host `llm` service and provider credentials. A polish normally makes one real model call, and a near-no-op first reply triggers one retry. The result arrives in one piece, not streamed. Undo keeps only the most recent polish.
 
 ## Development
 
