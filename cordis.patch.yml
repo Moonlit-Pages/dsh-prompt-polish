@@ -1,0 +1,23 @@
+# 提示词优化（dsh-prompt-polish）——本 bundle 贡献的配置层。
+#
+# 只有一段：插入插件自己的 loader 行。profile 的 cordis.patch.yml 可以用
+# `id: prompt-polish` 做定向覆盖；注意 `config` 是**整体替换**而非深合并，
+# 覆盖时要把想保留的字段一并写全。
+- insert:
+    - id: prompt-polish
+      name: 'dsh-prompt-polish'
+      config:
+        # 单次润色的输入上限（字符）。超出直接拒绝，不发模型请求。
+        maxInputChars: 20000
+        # 润色请求的输出 token 上限。
+        maxOutputTokens: 4096
+        # 端到端超时（毫秒），到时中止模型请求。
+        timeoutMs: 60000
+        # 采样温度。0 = 最保守，1 = 更自由。
+        temperature: 0.3
+        # 可选：固定润色用的 provider/model；留空则跟随当前会话模型，
+        # 再退回 agent-default-model。两个字段必须同时设置。
+        provider: ''
+        model: ''
+        # 可选：覆盖内置的润色 system prompt。留空使用内置。
+        systemPrompt: ''
