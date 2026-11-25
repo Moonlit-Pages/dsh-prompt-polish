@@ -2,9 +2,9 @@
   "tokens": [
     "--dsw-alias-bg-layer-2",
     "--dsw-alias-brand-primary",
+    "--dsw-alias-interactive-bg-hover",
     "--dsw-alias-label-primary",
     "--dsw-alias-label-secondary",
-    "--dsw-alias-state-error-primary",
-    "--dsw-alias-state-idle-primary"
+    "--dsw-alias-state-error-primary"
   ]
 }

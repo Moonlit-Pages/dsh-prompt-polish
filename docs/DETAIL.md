@@ -14,7 +14,7 @@ Open **Settings → Plugins → Add plugin**, choose this directory (the one con
 
 - Empty drafts disable the button.
 - Drafts containing `@file` references disable the button: replacing the draft would drop the reference chips, so the plugin refuses instead of losing them.
-- A failed polish leaves the draft untouched and shows the reason in a dismissible strip under the composer.
+- A failed polish leaves the draft untouched and shows the reason in a dismissible strip above the composer card, including the blank new-session composer.
 - The polish route uses the session's selected model, then the profile default, then fails with a clear error.
 - The same operation is exposed as the agent tool `polish_prompt`.
 

@@ -37,7 +37,7 @@ function loadBundle() {
 }
 
 const { entry, plugin } = loadBundle();
-const { createStore, createController, canOptimize, canUndo } = plugin.__test;
+const { createStore, createController, canOptimize, canUndo, stateFor } = plugin.__test;
 
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => payload };
@@ -77,7 +77,7 @@ test('apply registers the toolbar buttons and the status strip', () => {
   assert.equal(registrations.length, 2);
   assert.deepEqual(registrations.map((r) => r.options.name), [
     'conversation.input.right',
-    'conversation.composer.dock',
+    'conversation.input.dock',
   ]);
   assert.deepEqual(registrations.map((r) => r.options.id), ['prompt-polish', 'prompt-polish-status']);
   for (const registration of registrations) {
@@ -241,6 +241,9 @@ test('the gating helpers cover every disabled reason', () => {
   assert.equal(changed.visible, true);
   assert.equal(changed.enabled, false);
   assert.equal(changed.reason, 'changed');
+  const afterFailure = canUndo({ status: 'error', after: 'x' }, 'x');
+  assert.equal(afterFailure.visible, true);
+  assert.equal(afterFailure.enabled, true);
 });
 
 test('an empty draft makes no request', async () => {
@@ -252,4 +255,115 @@ test('an empty draft makes no request', async () => {
   const result = await controller.optimize({ text: '   ', setDraft: () => {}, getDraft: () => '' });
   assert.equal(result.code, 'empty-input');
   assert.equal(called, 0);
+});
+
+test('state from another session is invisible and cannot be undone there', async () => {
+  const store = createStore();
+  const controller = createController(store, {
+    fetch: async () => jsonResponse({ ok: true, value: { text: 'POLISHED' } }),
+  });
+  let draft = 'original';
+  const setDraft = (value) => { draft = value; };
+
+  await controller.optimize({ text: draft, sessionId: 'A', setDraft, getDraft: () => draft });
+  assert.equal(store.get().owner, 'A');
+  assert.equal(stateFor(store.get(), 'A').status, 'done');
+  assert.equal(stateFor(store.get(), 'B').status, 'idle');
+
+  const result = controller.undo({ sessionId: 'B', setDraft, getDraft: () => draft });
+  assert.equal(result.code, 'wrong-session');
+  assert.equal(draft, 'POLISHED');
+});
+
+test('the editor revision captured at click time guards the apply', async () => {
+  const store = createStore();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const controller = createController(store, {
+    fetch: async () => {
+      await gate;
+      return jsonResponse({ ok: true, value: { text: 'POLISHED' } });
+    },
+  });
+
+  let draft = 'original';
+  let revision = 7;
+  const setDraft = (value) => { draft = value; };
+  const pending = controller.optimize({
+    text: draft,
+    sessionId: 's',
+    rev: 7,
+    setDraft,
+    getDraft: () => draft,
+    getRev: () => revision,
+  });
+
+  revision = 8;
+  release();
+  const result = await pending;
+
+  assert.equal(result.code, 'draft-changed');
+  assert.equal(draft, 'original');
+  assert.equal(store.get().error.code, 'draft-changed');
+});
+
+test('a throwing setDraft resets the button instead of leaving it loading', async () => {
+  const store = createStore();
+  const controller = createController(store, {
+    fetch: async () => jsonResponse({ ok: true, value: { text: 'POLISHED' } }),
+  });
+
+  const result = await controller.optimize({
+    text: 'original',
+    sessionId: 's',
+    setDraft: () => { throw new Error('editor disposed'); },
+    getDraft: () => 'original',
+  });
+
+  assert.equal(result.code, 'apply-failed');
+  assert.equal(store.get().status, 'error');
+  assert.equal(store.get().error.code, 'apply-failed');
+});
+
+test('401 is mapped to the session-expired error, not a generic failure', async () => {
+  const store = createStore();
+  const controller = createController(store, {
+    fetch: async () => jsonResponse({}, { ok: false, status: 401 }),
+  });
+
+  const result = await controller.optimize({
+    text: 'original',
+    sessionId: 's',
+    setDraft: () => {},
+    getDraft: () => 'original',
+  });
+
+  assert.equal(result.code, 'unauthorized');
+  assert.equal(store.get().error.code, 'unauthorized');
+});
+
+test('cancel clears the loading state for its own session only', async () => {
+  const store = createStore();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const controller = createController(store, {
+    fetch: async () => { await gate; return jsonResponse({ ok: true, value: { text: 'x' } }); },
+  });
+
+  const pending = controller.optimize({
+    text: 'original',
+    sessionId: 'A',
+    setDraft: () => {},
+    getDraft: () => 'original',
+  });
+  assert.equal(store.get().status, 'loading');
+
+  controller.cancel('B');
+  assert.equal(store.get().status, 'loading', 'another session cannot cancel this request');
+
+  controller.cancel('A');
+  assert.equal(store.get().status, 'idle');
+  release();
+  const result = await pending;
+  assert.equal(result.code, 'superseded');
 });
