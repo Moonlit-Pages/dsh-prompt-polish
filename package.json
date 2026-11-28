@@ -1,7 +1,7 @@
 {
   "name": "dsh-prompt-polish",
-  "version": "0.2.0",
-  "description": "Prompt polish button beside the composer model selector: rewrite the draft, then undo the rewrite.",
+  "version": "0.3.0",
+  "description": "Composer toolbar prompt polish: three styles, optional session context, request details, and multi-step undo.",
   "type": "module",
   "license": "MIT",
   "icon": "./icon.svg",
@@ -36,7 +36,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/optimizer.test.mjs test/routes.test.mjs test/client.test.mjs",
+    "test": "node --test test/optimizer.test.mjs test/routes.test.mjs test/context.test.mjs test/client.test.mjs",
     "preflight": "node scripts/preflight.mjs",
     "prepack": "node scripts/preflight.mjs"
   },

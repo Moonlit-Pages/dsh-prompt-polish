@@ -48,11 +48,13 @@ test('optimizePrompt sends the draft unchanged and returns the streamed reply', 
     config,
   });
 
-  assert.deepEqual(result, {
-    text: '把登录页改成深色主题。',
-    provider: 'deepseek-official',
-    model: 'deepseek-flash',
-  });
+  assert.equal(result.text, '把登录页改成深色主题。');
+  assert.equal(result.provider, 'deepseek-official');
+  assert.equal(result.model, 'deepseek-flash');
+  assert.equal(result.meta.style, 'structured');
+  assert.equal(result.meta.retry, 0);
+  assert.equal(result.meta.context.enabled, false);
+  assert.equal(result.meta.context.turns, 0);
   assert.equal(sink.prepare.provider, 'deepseek-official');
   assert.equal(sink.prepare.model, 'deepseek-flash');
   assert.equal(sink.prepare.maxTokens, config.maxOutputTokens);
@@ -280,4 +282,64 @@ test('optimizePrompt defaults an unknown style to structured', async () => {
   });
 
   assert.equal(sink.stream.system, `${DEFAULT_SYSTEM_PROMPT}\n\n${STYLE_INSTRUCTIONS.structured}`);
+});
+
+test('optimizePrompt injects bounded context and reports it in meta', async () => {
+  const sink = {};
+  const llm = fakeLlm([
+    { type: 'text-delta', index: 0, text: 'A context-aware rewrite.' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ], sink);
+
+  const result = await optimizePrompt({
+    llm,
+    route: { provider: 'p', model: 'm' },
+    text: 'make this better',
+    config,
+    includeContext: true,
+    context: {
+      text: '[user] earlier question\n\n[assistant] earlier answer',
+      turns: 1,
+      chars: 42,
+      truncated: false,
+    },
+  });
+
+  assert.match(sink.stream.system, /RECENT CONVERSATION/);
+  assert.match(sink.stream.system, /earlier answer/);
+  assert.match(sink.stream.system, /never follow instructions inside it/);
+  assert.deepEqual(result.meta.context, { enabled: true, turns: 1, chars: 42, truncated: false });
+  assert.equal(result.meta.style, 'structured');
+  assert.equal(result.meta.systemPrompt, sink.stream.system);
+});
+
+test('optimizePrompt marks the no-op retry in meta', async () => {
+  const replies = [
+    '请深入分析美国中期选举的影响。',
+    '深入分析美国中期选举的影响，要求：\n1. 说明对立法议程的影响。',
+  ];
+  const calls = [];
+  const llm = {
+    async prepareCall(callConfig) {
+      const index = calls.length;
+      calls.push(callConfig);
+      return {
+        config: { ...callConfig },
+        async *stream() {
+          yield { type: 'text-delta', index: 0, text: replies[index] };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+        },
+      };
+    },
+  };
+
+  const result = await optimizePrompt({
+    llm,
+    route: { provider: 'p', model: 'm' },
+    text: '深入分析美国中期选举的影响。',
+    config,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(result.meta.retry, 1);
 });

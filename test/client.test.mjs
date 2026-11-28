@@ -235,15 +235,15 @@ test('the gating helpers cover every disabled reason', () => {
   assert.equal(idle.visible, false);
   assert.equal(idle.enabled, false);
   assert.equal(idle.reason, 'idle');
-  const ready = canUndo({ status: 'done', after: 'x' }, 'x');
+  const ready = canUndo({ status: 'done', after: 'x', history: [{ before: 'o', after: 'x' }] }, 'x');
   assert.equal(ready.visible, true);
   assert.equal(ready.enabled, true);
   assert.equal(ready.reason, 'ready');
-  const changed = canUndo({ status: 'done', after: 'x' }, 'y');
+  const changed = canUndo({ status: 'done', after: 'x', history: [{ before: 'o', after: 'x' }] }, 'y');
   assert.equal(changed.visible, true);
   assert.equal(changed.enabled, false);
   assert.equal(changed.reason, 'changed');
-  const afterFailure = canUndo({ status: 'error', after: 'x' }, 'x');
+  const afterFailure = canUndo({ status: 'error', after: 'x', history: [{ before: 'o', after: 'x' }] }, 'x');
   assert.equal(afterFailure.visible, true);
   assert.equal(afterFailure.enabled, true);
 });
@@ -390,4 +390,133 @@ test('the selected rewrite style is sent to the host', async () => {
   });
 
   assert.equal(JSON.parse(calls[0].init.body).style, 'concise');
+});
+
+test('every successful step is recorded and undo walks back one at a time', async () => {
+  const store = createStore();
+  const replies = ['FIRST', 'SECOND'];
+  let call = 0;
+  const controller = createController(store, {
+    fetch: async () => jsonResponse({ ok: true, value: { text: replies[call++] } }),
+  });
+
+  let draft = 'original';
+  const setDraft = (value) => { draft = value; };
+  await controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'FIRST');
+  assert.equal(store.get().history.length, 1);
+
+  await controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'SECOND');
+  assert.equal(store.get().history.length, 2);
+
+  const firstUndo = controller.undo({ sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(firstUndo.ok, true);
+  assert.equal(draft, 'FIRST');
+  assert.equal(store.get().history.length, 1);
+  assert.equal(store.get().status, 'done');
+
+  const secondUndo = controller.undo({ sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(secondUndo.ok, true);
+  assert.equal(draft, 'original');
+  assert.equal(store.get().history.length, 0);
+  assert.equal(store.get().status, 'idle');
+});
+
+test('the request carries the opt-in context window and stores meta', async () => {
+  const store = createStore();
+  const calls = [];
+  const controller = createController(store, {
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return jsonResponse({
+        ok: true,
+        value: {
+          text: 'POLISHED',
+          meta: {
+            style: 'concise',
+            systemPrompt: 'system text',
+            provider: 'p',
+            model: 'm',
+            inputChars: 8,
+            retry: 1,
+            context: { enabled: true, turns: 2, chars: 120, truncated: false },
+          },
+        },
+      });
+    },
+  });
+
+  let draft = 'original';
+  await controller.optimize({
+    text: draft,
+    sessionId: 's',
+    style: 'concise',
+    includeContext: true,
+    contextRounds: 3,
+    setDraft: (value) => { draft = value; },
+    getDraft: () => draft,
+  });
+
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.includeContext, true);
+  assert.equal(body.contextRounds, 3);
+  assert.equal(store.get().meta.provider, 'p');
+  assert.equal(store.get().meta.context.turns, 2);
+  assert.equal(store.get().detailsOpen, false);
+});
+
+test('cancel restores the previous step instead of clearing history', async () => {
+  const store = createStore();
+  let call = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const controller = createController(store, {
+    fetch: async () => {
+      call += 1;
+      if (call === 1) return jsonResponse({ ok: true, value: { text: 'FIRST' } });
+      await gate;
+      return jsonResponse({ ok: true, value: { text: 'SECOND' } });
+    },
+  });
+
+  let draft = 'original';
+  const setDraft = (value) => { draft = value; };
+  await controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+  const pending = controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+
+  controller.cancel('s');
+  assert.equal(store.get().status, 'done');
+  assert.equal(store.get().after, 'FIRST');
+  assert.equal(draft, 'FIRST');
+  release();
+  const result = await pending;
+  assert.equal(result.code, 'superseded');
+});
+
+test('undo still walks back after a manual edit between steps', async () => {
+  const store = createStore();
+  const replies = ['A', 'C'];
+  let call = 0;
+  const controller = createController(store, {
+    fetch: async () => jsonResponse({ ok: true, value: { text: replies[call++] } }),
+  });
+
+  let draft = 'original';
+  const setDraft = (value) => { draft = value; };
+  await controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'A');
+
+  draft = 'B'; // manual edit between the two steps
+  await controller.optimize({ text: draft, sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'C');
+  assert.equal(store.get().history.length, 2);
+
+  controller.undo({ sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'B');
+  assert.equal(store.get().history.length, 1);
+
+  controller.undo({ sessionId: 's', setDraft, getDraft: () => draft });
+  assert.equal(draft, 'original');
+  assert.equal(store.get().status, 'idle');
 });

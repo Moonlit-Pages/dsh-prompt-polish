@@ -1,10 +1,14 @@
 # 提示词优化（dsh-prompt-polish）
 
-在 DeepSeek Harness 的输入框工具栏左侧加一个「**AI 润色**」按钮（带三档风格选择）和「**撤销**」按钮。润色结果写回输入框供你确认，**不会自动发送**。
+在 DeepSeek Harness 的输入框工具栏左侧加「**AI 润色**」按钮，带三档风格、可选会话上下文、请求详情、多步撤销与继续润色。结果写回输入框供你确认，**不会自动发送**。
 
 - **AI 润色**：把当前草稿发给 Host，用当前会话/工作区已配置的模型重写成更清晰、结构化、可执行的提示词，然后写回输入框；不自动发送。
 - **三档风格**：`结构化`（编号要求 + 输出形态）、`简洁`（最短无歧义版本）、`详细`（范围、约束、边界情况、验收标准）。选择会记住，只保存风格名，不保存正文。
-- **撤销**：把输入框精确恢复成润色前的那一版文本；不会重新调用模型。
+- **多步撤销**：每次成功润色都会记录一步（最多 5 步），「撤销」逐步回退，不会重新调用模型；可连续点击回到最初草稿。
+- **继续润色**：成功后按钮变为「继续润色」，以上一次结果为输入继续精炼；历史保留，仍可逐步撤销。
+- **可选会话上下文**：默认关闭；选择「最近 3/5/10/20 轮」后，只把最近的人类/助手消息作为参考发给模型（排除 system/tool/项目内容），可在请求详情里看到轮数与字符数。
+- **请求详情**：结果旁的 ⓘ 展示本次模型、风格、输入长度、上下文统计与实际 System Prompt，便于核对；仅前端内存展示。
+- **可取消 + 耗时**：润色期间显示已用秒数，可随时取消；取消会恢复到上一步结果。
 - **不覆盖手改**：润色返回前你继续打字，或润色后手动改了草稿，结果不会写入 / 撤销会拒绝执行，并明确提示原因。
 - **保留原意与细节**：语言、代码块、行内代码、路径、URL、数字、引用文本都要求原样保留；只补结构、维度与验收标准，不编造事实。
 - **空输入自动禁用；超过 12000 字提前禁用**并显示上限，不发请求。
@@ -34,12 +38,12 @@ plugin_manager(action: "install_bundle", target: "/绝对路径/dsh-prompt-polis
 
 1. 在输入框写草稿（纯文本；空草稿、含引用、超过 12000 字时按钮禁用并说明原因）。
 2. 选择风格：`结构化` / `简洁` / `详细`（默认结构化）。
-3. 点「AI 润色」。按钮显示加载动画，输入框上方显示「正在润色提示词…」，完成后输入框被替换；不会发送。
-4. 需要回退时点「撤销」。撤销窗口在以下情况关闭或失效：
-   - 你手动修改了草稿（撤销按钮变灰，避免覆盖你的编辑）；
-   - 草稿被发送或清空（撤销窗口关闭）；
-   - 你发起了下一次润色（只保留最近一次）。
-5. 润色失败时，输入框不动；输入框上方出现错误条，可关闭后重试（空白新会话页同样可见）。
+3. 可选：选择上下文轮数（默认「无上下文」；开启后只发送最近的人类/助手消息，不含 system/tool/项目内容）。
+4. 点「AI 润色」。输入框上方显示「正在润色提示词… + 秒数」和「取消」；完成后输入框被替换；不会发送。
+5. 需要回退时点「撤销」，每点一次退一步（最多 5 步）；成功后按钮变为「继续润色」，可基于当前结果继续精炼。
+6. 点结果旁的 ⓘ 查看本次请求详情（模型/风格/输入长度/上下文/实际 System Prompt）。
+7. 润色失败时，输入框不动；输入框上方出现错误条，可关闭后重试（空白新会话页同样可见）。
+8. 草稿被发送或清空时，历史窗口关闭；手动改过草稿后撤销按钮变灰，避免覆盖你的编辑。
 
 草稿里含 `@文件` 引用时按钮会禁用：替换草稿会丢失引用芯片，因此宁可不让点，也不静默丢引用。
 
@@ -61,6 +65,11 @@ plugin_manager(action: "install_bundle", target: "/绝对路径/dsh-prompt-polis
     provider: ''
     model: ''
     systemPrompt: ''
+    contextDefault: false
+    contextRounds: 5
+    contextRoundsMax: 20
+    maxContextChars: 4000
+    maxContextMessageChars: 1200
 ```
 
 | 字段 | 默认值 | 说明 |
@@ -71,10 +80,15 @@ plugin_manager(action: "install_bundle", target: "/绝对路径/dsh-prompt-polis
 | `temperature` | `0.3` | 采样温度，越低越保守。范围 0–2。 |
 | `provider` / `model` | 空 | 固定润色路由；两个字段必须同时设置。留空则跟随会话模型。 |
 | `systemPrompt` | 空 | 覆盖内置润色提示词；留空使用内置。上限 16000 字符。自定义后不再启用「近似无改写重试」。 |
+| `contextDefault` | `false` | 是否默认开启会话上下文；界面仍可逐次切换。 |
+| `contextRounds` | `5` | 默认上下文轮数。范围 1–50，且不超过 `contextRoundsMax`。 |
+| `contextRoundsMax` | `20` | 前端可选的最大轮数。范围 1–100。 |
+| `maxContextChars` | `4000` | 注入上下文的总字符预算；超出时从最旧消息开始丢弃。范围 500–20000。 |
+| `maxContextMessageChars` | `1200` | 单条上下文消息的字符预算，超出保留头尾并标注截断。范围 100–10000。 |
 
 ## Agent 工具
 
-同一操作也注册为 Agent 工具 `polish_prompt`（参数 `prompt`，可选 `style: structured|concise|detailed`），与按钮共用同一段 Host 逻辑，返回润色后的纯文本。适合「帮我把这段提示词改好」这类请求。注意工具调用会进入会话记录；严格不落盘时请只用按钮。
+同一操作也注册为 Agent 工具 `polish_prompt`（参数 `prompt`，可选 `style`、`include_context`、`context_rounds`），与按钮共用同一段 Host 逻辑，返回润色后的纯文本。适合「帮我把这段提示词改好」这类请求。注意工具调用会进入会话记录；严格不落盘时请只用按钮。
 
 ## 请求链路
 
@@ -84,14 +98,14 @@ plugin_manager(action: "install_bundle", target: "/绝对路径/dsh-prompt-polis
   → 路由准入：connection.requestRejection（Host/Origin + 登录会话）
   → 解析模型：config 覆盖 → 会话模型 → profile 默认
   → llm.prepareCall → llm.stream → 拼装文本
-  → 返回 { text, provider, model }
+  → 返回 { text, provider, model, meta }（meta 含实际 System Prompt、风格、上下文统计、重试次数）
 ```
 
-另有 `GET api/dsh-prompt-polish/health` 用于自检（版本、限额、固定路由、可用风格）。前端启动时读取该限额，用于「超长提前禁用」。
+另有 `GET api/dsh-prompt-polish/health` 用于自检（版本、限额、固定路由、可用风格、上下文上限）。前端启动时读取限额，用于「超长提前禁用」与上下文轮数选项。
 
 ### 隐私
 
-按钮路径不写日志、不落盘、不创建会话事件；草稿正文只作为 `POST /optimize` 的请求体发送给当前 provider。风格选择仅以 `structured|concise|detailed` 存在浏览器 localStorage，不含正文。
+按钮路径不写日志、不落盘、不创建会话事件；草稿正文只作为 `POST /optimize` 的请求体发送给当前 provider。开启上下文时，最近的人类/助手消息也随该请求发送（不含 system/tool/项目内容），不落盘。风格与上下文轮数仅以 `structured|concise|detailed` 和数字存在浏览器 localStorage，不含正文。
 
 ## 限制
 
@@ -100,13 +114,14 @@ plugin_manager(action: "install_bundle", target: "/绝对路径/dsh-prompt-polis
 - 非流式：等待完整结果后一次性写入；长提示词可能等待数秒到数十秒，输入框上方会显示「正在润色提示词…」。
 - 不处理草稿中的 `@文件` 引用（含引用时禁用）。
 - 三种风格共用同一套保留规则，但「简洁」仍会消除歧义，不保证与原文逐字相同。
-- 撤销只保留最近一次；不提供多级历史。
+- 撤销最多保留最近 5 步；更早历史不再保留。
+- 上下文只读当前会话的 user/assistant surface；不读取项目文件、工具结果或 system prompt。
 - 视觉验证依赖实际页面：本仓库测试覆盖 Host 核心、HTTP 路由、客户端动作与槽位注册，不替代浏览器里的肉眼检查。
 
 ## 开发与测试
 
 ```sh
-npm test          # optimizer / routes / client 三组测试（40 项）
+npm test          # optimizer / routes / context / client 四组测试（56 项）
 npm run preflight # 清单、bundle、locale、图标、主题 token 自检
 ```
 
@@ -116,7 +131,8 @@ npm run preflight # 清单、bundle、locale、图标、主题 token 自检
 - `lib/routes.js` — HTTP 路由、准入、边界与错误映射
 - `lib/tool.js` — `polish_prompt` 工具
 - `lib/index.js` — 装配、模型路由解析
-- `lib/client.js` — 浏览器 bundle（按钮 + 风格选择 + 撤销 + 错误条）
+- `lib/context.js` — 会话 surface 读取、过滤、头尾截断
+- `lib/client.js` — 浏览器 bundle（按钮 + 风格/上下文 + 多步撤销 + 详情 + 错误条）
 - `test/` — Node 测试；`scripts/preflight.mjs` — 分发自检
 
 ## 许可

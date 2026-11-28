@@ -12,6 +12,11 @@ const config = {
   provider: '',
   model: '',
   systemPrompt: '',
+  contextDefault: false,
+  contextRounds: 5,
+  contextRoundsMax: 20,
+  maxContextChars: 4000,
+  maxContextMessageChars: 1200,
 };
 
 function makeReq({ method = 'POST', body, headers = {}, remoteAddress = '127.0.0.1', url = '/' } = {}) {
@@ -45,7 +50,7 @@ function makeRes() {
 function build(overrides = {}) {
   return createRoutes({
     config,
-    version: '0.1.0',
+    version: '0.3.0',
     authorize: () => undefined,
     optimize: async ({ text }) => ({ text: `polished:${text}`, provider: 'p', model: 'm' }),
     ...overrides,
@@ -57,9 +62,10 @@ test('health reports the plugin, version, and limits', async () => {
   await build()[0].handler(makeReq({ method: 'GET' }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.json().value.plugin, 'dsh-prompt-polish');
-  assert.equal(res.json().value.version, '0.1.0');
+  assert.equal(res.json().value.version, '0.3.0');
   assert.equal(res.json().value.limits.maxInputChars, 20);
   assert.deepEqual(res.json().value.styles, ['structured', 'concise', 'detailed']);
+  assert.deepEqual(res.json().value.context, { default: false, rounds: 5, maxRounds: 20, maxChars: 4000 });
 });
 
 test('health refuses other methods', async () => {
@@ -84,7 +90,27 @@ test('optimize returns the polished envelope and forwards the session', async ()
   assert.equal(seen[0].text, 'draft');
   assert.equal(seen[0].sessionId, 's1');
   assert.equal(seen[0].style, 'structured');
+  assert.equal(seen[0].includeContext, false);
+  assert.equal(seen[0].contextRounds, undefined);
   assert.ok(seen[0].signal instanceof AbortSignal);
+});
+
+test('optimize forwards an explicit context window', async () => {
+  const seen = [];
+  const routes = build({
+    optimize: async (request) => {
+      seen.push(request);
+      return { text: 'better' };
+    },
+  });
+  const res = makeRes();
+  await routes[1].handler(makeReq({
+    body: { text: 'draft', sessionId: 's1', includeContext: true, contextRounds: 3 },
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(seen[0].includeContext, true);
+  assert.equal(seen[0].contextRounds, 3);
 });
 
 test('optimize omits a blank session id', async () => {
@@ -133,6 +159,21 @@ test('optimize validates method, body, text, and size', async () => {
   await routes[1].handler(makeReq({ body: { text: 'draft', style: 'wild' } }), badStyle);
   assert.equal(badStyle.statusCode, 400);
   assert.equal(badStyle.json().error.code, 'invalid-style');
+
+  for (const contextRounds of [0, 1.5, 21]) {
+    const badContext = makeRes();
+    await routes[1].handler(makeReq({
+      body: { text: 'draft', includeContext: true, contextRounds },
+    }), badContext);
+    assert.equal(badContext.statusCode, 400, `rounds=${contextRounds}`);
+    assert.equal(badContext.json().error.code, 'invalid-context');
+  }
+
+  const ignoredRounds = makeRes();
+  await routes[1].handler(makeReq({
+    body: { text: 'draft', includeContext: false, contextRounds: 999 },
+  }), ignoredRounds);
+  assert.equal(ignoredRounds.statusCode, 200);
 });
 
 test('optimize maps core failures to status codes and never leaks a stack', async () => {
@@ -166,6 +207,15 @@ test('optimize answers 504 when the core call exceeds the timeout', async () => 
   await routes[1].handler(makeReq({ body: { text: 'draft' } }), res);
   assert.equal(res.statusCode, 504);
   assert.equal(res.json().error.code, 'timeout');
+});
+
+test('optimize maps an unavailable context service to 503', async () => {
+  const res = makeRes();
+  await build({
+    optimize: async () => { throw new OptimizeError('context-unavailable', 'no session query', 503); },
+  })[1].handler(makeReq({ body: { text: 'draft', includeContext: true } }), res);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.json().error.code, 'context-unavailable');
 });
 
 test('optimize answers 499 for a non-timeout abort', async () => {
